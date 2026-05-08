@@ -2,6 +2,8 @@
 package com.project.ome.api.service;
 
 import com.project.ome.api.dto.order.*;
+import com.project.ome.engine.core.MatchingEngineRegistry;
+import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.shared.dto.PageResponse;
 import com.project.ome.shared.entity.*;
 import com.project.ome.shared.exception.*;
@@ -22,6 +24,8 @@ public class OrderService {
     private final OrderRepository      orderRepository;
     private final AccountRepository    accountRepository;
     private final InstrumentRepository instrumentRepository;
+    private final MatchingEngineRegistry engineRegistry;
+    
 
     @Transactional
     public OrderResponse placeOrder(PlaceOrderRequest request, UUID userId) {
@@ -73,6 +77,7 @@ public class OrderService {
         // Phase 3 (Week 3): publish to Disruptor here
         // engineGateway.submit(OrderCommand.from(saved));
 
+        submitToEngine(saved);
         return toResponse(saved);
     }
 
@@ -189,4 +194,29 @@ public class OrderService {
                 .updatedAt(o.getUpdatedAt())
                 .build();
     }
+
+//     submitToEngine(saved);
+    private void submitToEngine(Order saved) {
+    if (!engineRegistry.hasEngine(saved.getInstrument().getSymbol())) {
+        log.warn("No engine for symbol: {}", saved.getInstrument().getSymbol());
+        return;
+    }
+
+    EngineOrder engineOrder = EngineOrder.builder()
+            .orderId(saved.getId())
+            .userId(saved.getUser().getId())
+            .symbol(saved.getInstrument().getSymbol())
+            .side(EngineOrder.Side.valueOf(saved.getSide().name()))
+            .type(EngineOrder.Type.valueOf(saved.getType().name()))
+            .price(saved.getPrice())
+            .remainingQty(saved.getQuantity())
+            .timestamp(saved.getCreatedAt())
+            .build();
+
+    // Direct call for now — Week 3 replaces with Disruptor
+    engineRegistry.getEngine(saved.getInstrument().getSymbol())
+                  .process(engineOrder);
+}
+    
+
 }

@@ -1,11 +1,12 @@
-// src/main/java/com/project/ome/api/dto/order/PlaceOrderRequest.java
 package com.project.ome.api.dto.order;
 
+import com.project.ome.api.validator.ValidOrder;
 import jakarta.validation.constraints.*;
 import lombok.Data;
 import java.math.BigDecimal;
 
 @Data
+@ValidOrder   // ← THIS must be here — class level annotation
 public class PlaceOrderRequest {
 
     @NotBlank(message = "Symbol is required")
@@ -14,22 +15,20 @@ public class PlaceOrderRequest {
     private String symbol;
 
     @NotNull(message = "Side is required")
-    private OrderSide side;           // BUY | SELL
+    private OrderSide side;
 
     @NotNull(message = "Order type is required")
-    private OrderType type;           // LIMIT | MARKET
+    private OrderType type;
 
     @NotNull(message = "Quantity is required")
     @DecimalMin(value = "0.00001", message = "Quantity must be greater than 0")
     @Digits(integer = 12, fraction = 8)
     private BigDecimal quantity;
 
-    // Required for LIMIT orders, ignored for MARKET
     @DecimalMin(value = "0.00000001", message = "Price must be positive")
     @Digits(integer = 12, fraction = 8)
-    private BigDecimal price;
+    private BigDecimal price;    // ← NO @NotNull here — @ValidOrder handles it
 
-    // Client-supplied idempotency key (optional but recommended)
     @Size(max = 64)
     private String clientOrderId;
 }

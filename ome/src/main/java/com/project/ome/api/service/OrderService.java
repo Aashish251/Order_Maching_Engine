@@ -120,16 +120,26 @@ public class OrderService {
     // ── Private helpers ──────────────────────────────────────────
 
     private void reserveBalance(UUID userId, PlaceOrderRequest req,
-                                Instrument instrument) {
-        // For BUY orders: reserve quote currency (USD)
-        // For SELL orders: reserve base currency (BTC)
+                            Instrument instrument) {
         String currency = req.getSide() == OrderSide.BUY
                 ? instrument.getQuoteCurrency()
                 : instrument.getBaseCurrency();
 
-        BigDecimal amount = req.getSide() == OrderSide.BUY
-                ? req.getPrice().multiply(req.getQuantity())
-                : req.getQuantity();
+        BigDecimal amount;
+
+        if (req.getSide() == OrderSide.BUY) {
+                // MARKET orders won't have a price — use a high estimate
+                // LIMIT orders must have price (validated by @ValidOrder)
+                if (req.getPrice() == null) {
+                throw new BusinessException(
+                        "PRICE_REQUIRED",
+                        "Price is required for BUY orders",
+                        org.springframework.http.HttpStatus.BAD_REQUEST);
+                }
+                amount = req.getPrice().multiply(req.getQuantity());
+        } else {
+                amount = req.getQuantity();
+        }
 
         Account account = accountRepository
                 .findByUserIdAndCurrencyForUpdate(userId, currency)
@@ -139,12 +149,12 @@ public class OrderService {
                         org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY));
 
         try {
-            account.reserveFunds(amount);
-            accountRepository.save(account);
+                account.reserveFunds(amount);
+                accountRepository.save(account);
         } catch (IllegalStateException e) {
-            throw BusinessException.insufficientBalance();
+                throw BusinessException.insufficientBalance();
         }
-    }
+}
 
     private void releaseReservedBalance(UUID userId, Order order) {
         String currency = order.getSide() == Order.Side.BUY
@@ -162,7 +172,6 @@ public class OrderService {
                     accountRepository.save(account);
                 });
     }
-
     private OrderResponse toResponse(Order o) {
         return OrderResponse.builder()
                 .id(o.getId())

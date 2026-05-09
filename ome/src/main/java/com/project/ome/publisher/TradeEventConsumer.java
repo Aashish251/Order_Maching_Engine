@@ -21,6 +21,7 @@ public class TradeEventConsumer {
     private final TradeRepository    tradeRepository;
     private final TradeLegRepository tradeLegRepository;
     private final OrderRepository    orderRepository;
+    private final InstrumentRepository instrumentRepository;
 
     @KafkaListener(
         topics   = "${app.kafka.topics.trade-executed}",
@@ -107,7 +108,9 @@ public class TradeEventConsumer {
     }
 
     private UUID resolveInstrumentId(String symbol) {
-        // Simplified — in production cache this
-        return UUID.randomUUID();
+    return instrumentRepository.findBySymbol(symbol)
+            .orElseThrow(() -> new IllegalArgumentException(
+                    "Instrument not found: " + symbol))
+            .getId();
     }
 }

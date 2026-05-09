@@ -25,12 +25,12 @@ public interface OrderRepository extends JpaRepository<Order, UUID> {
 
     // Used on engine restart to reload open orders into memory
     @Query("""
-        SELECT o FROM Order o
-        JOIN FETCH o.instrument i
-        WHERE i.symbol = :symbol
-          AND o.status IN ('OPEN', 'PARTIALLY_FILLED')
-        ORDER BY o.createdAt ASC
-        """)
+      SELECT o FROM Order o
+      JOIN FETCH o.instrument i
+      WHERE i.symbol = :symbol
+        AND o.status IN ('OPEN', 'PARTIALLY_FILLED', 'PENDING')
+      ORDER BY o.createdAt ASC
+      """)
     List<Order> findOpenOrdersBySymbol(String symbol);
 
     // Idempotency check

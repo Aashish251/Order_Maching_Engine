@@ -3,6 +3,7 @@ package com.project.ome.api.service;
 
 import com.project.ome.api.dto.order.*;
 import com.project.ome.engine.core.MatchingEngineRegistry;
+import com.project.ome.engine.disruptor.EngineGateway;
 import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.shared.dto.PageResponse;
 import com.project.ome.shared.entity.*;
@@ -24,7 +25,7 @@ public class OrderService {
     private final OrderRepository      orderRepository;
     private final AccountRepository    accountRepository;
     private final InstrumentRepository instrumentRepository;
-    private final MatchingEngineRegistry engineRegistry;
+    private final EngineGateway engineGateway;
     
 
     @Transactional
@@ -74,8 +75,6 @@ public class OrderService {
                  saved.getId(), saved.getSide(), saved.getInstrument().getSymbol(),
                  saved.getPrice(), saved.getQuantity());
 
-        // Phase 3 (Week 3): publish to Disruptor here
-        // engineGateway.submit(OrderCommand.from(saved));
 
         submitToEngine(saved);
         return toResponse(saved);
@@ -119,6 +118,19 @@ public class OrderService {
         releaseReservedBalance(userId, order);
 
         order.setStatus(Order.Status.CANCELLED);
+        EngineOrder engineOrder = EngineOrder.builder()
+                .orderId(order.getId())
+                .userId(order.getUser().getId())
+                .symbol(order.getInstrument().getSymbol())
+                .side(EngineOrder.Side.valueOf(order.getSide().name()))
+                .type(EngineOrder.Type.valueOf(order.getType().name()))
+                .price(order.getPrice())
+                .remainingQty(order.getRemainingQty())
+                .timestamp(order.getCreatedAt())
+                .build();
+
+        engineGateway.cancelOrder(engineOrder);
+
         return toResponse(orderRepository.save(order));
     }
 
@@ -195,13 +207,7 @@ public class OrderService {
                 .build();
     }
 
-//     submitToEngine(saved);
     private void submitToEngine(Order saved) {
-    if (!engineRegistry.hasEngine(saved.getInstrument().getSymbol())) {
-        log.warn("No engine for symbol: {}", saved.getInstrument().getSymbol());
-        return;
-    }
-
     EngineOrder engineOrder = EngineOrder.builder()
             .orderId(saved.getId())
             .userId(saved.getUser().getId())
@@ -213,10 +219,8 @@ public class OrderService {
             .timestamp(saved.getCreatedAt())
             .build();
 
-    // Direct call for now — Week 3 replaces with Disruptor
-    engineRegistry.getEngine(saved.getInstrument().getSymbol())
-                  .process(engineOrder);
-}
+        engineGateway.submitOrder(engineOrder);   // non-blocking, returns instantly
+        }
     
 
 }

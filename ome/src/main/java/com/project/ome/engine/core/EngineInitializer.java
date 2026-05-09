@@ -1,10 +1,9 @@
-// src/main/java/com/project/ome/engine/core/EngineInitializer.java
+// EngineInitializer.java — full updated version
 package com.project.ome.engine.core;
 
-import com.project.ome.shared.repository.InstrumentRepository;
-import com.project.ome.shared.repository.OrderRepository;
-import com.project.ome.engine.model.OrderBook;  
 import com.project.ome.engine.model.*;
+import com.project.ome.publisher.TradeEventPublisher;
+import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -20,6 +19,7 @@ public class EngineInitializer implements ApplicationRunner {
     private final MatchingEngineRegistry engineRegistry;
     private final InstrumentRepository   instrumentRepository;
     private final OrderRepository        orderRepository;
+    private final TradeEventPublisher    tradeEventPublisher; // ← real publisher
 
     @Override
     public void run(ApplicationArguments args) {
@@ -29,15 +29,14 @@ public class EngineInitializer implements ApplicationRunner {
                 .forEach(instrument -> {
                     engineRegistry.registerInstrument(
                             instrument.getSymbol(),
-                            this::handleTrade,
-                            this::handleBookUpdate
+                            tradeEventPublisher::publish,  // ← Kafka publisher
+                            this::handleBookUpdate         // ← Week 4: WebSocket
                     );
-
-                    // Reload open orders into memory on restart
                     reloadOpenOrders(instrument.getSymbol());
                 });
 
-        log.info("All matching engines initialized.");
+        log.info("Matching engines initialized for {} instruments.",
+                instrumentRepository.findByTradingEnabledTrue().size());
     }
 
     private void reloadOpenOrders(String symbol) {
@@ -56,25 +55,15 @@ public class EngineInitializer implements ApplicationRunner {
                     .remainingQty(order.getRemainingQty())
                     .timestamp(order.getCreatedAt())
                     .build();
-
-            // Add directly to book, don't match (already validated)
             engine.getOrderBook().addOrder(engineOrder);
         });
 
         log.info("Reloaded {} open orders for {}", openOrders.size(), symbol);
     }
 
-    // Temporary handlers — replaced by real publishers in Week 3
-    private void handleTrade(TradeEvent event) {
-        log.info("TRADE EXECUTED: {} {} @ {} qty={}",
-                event.getSymbol(),
-                event.getAggressorSide(),
-                event.getPrice(),
-                event.getQuantity());
-    }
-
     private void handleBookUpdate(OrderBookUpdateEvent event) {
-        log.debug("BOOK UPDATE: {} bids={} asks={}",
+        // Week 4: replace with WebSocket publisher
+        log.debug("Book update: {} bids={} asks={}",
                 event.getSymbol(),
                 event.getBids().size(),
                 event.getAsks().size());

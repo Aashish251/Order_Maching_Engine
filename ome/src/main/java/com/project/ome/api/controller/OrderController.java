@@ -20,7 +20,7 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<ApiResponse<OrderResponse>> placeOrder(
             @Valid @RequestBody PlaceOrderRequest request,
-            @AuthenticationPrincipal UUID userId) {   // ← from JWT filter
+            @AuthenticationPrincipal UUID userId) { // ← from JWT filter
         OrderResponse response = orderService.placeOrder(request, userId);
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.ok("Order accepted for matching", response));
@@ -36,11 +36,10 @@ public class OrderController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<OrderResponse>>> getOrders(
-            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal UUID userId) {
-        PageResponse<OrderResponse> response =
-                orderService.getOrders(userId, page, size);
+        PageResponse<OrderResponse> response = orderService.getOrders(userId, page, size);
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 

@@ -1,7 +1,7 @@
-// EngineInitializer.java — full updated version
 package com.project.ome.engine.core;
 
 import com.project.ome.engine.model.*;
+import com.project.ome.marketdata.MarketDataPublisher;
 import com.project.ome.publisher.TradeEventPublisher;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +19,8 @@ public class EngineInitializer implements ApplicationRunner {
     private final MatchingEngineRegistry engineRegistry;
     private final InstrumentRepository   instrumentRepository;
     private final OrderRepository        orderRepository;
-    private final TradeEventPublisher    tradeEventPublisher; // ← real publisher
+    private final TradeEventPublisher    tradeEventPublisher;
+    private final MarketDataPublisher    marketDataPublisher;  // ← ADD
 
     @Override
     public void run(ApplicationArguments args) {
@@ -29,8 +30,8 @@ public class EngineInitializer implements ApplicationRunner {
                 .forEach(instrument -> {
                     engineRegistry.registerInstrument(
                             instrument.getSymbol(),
-                            tradeEventPublisher::publish,  // ← Kafka publisher
-                            this::handleBookUpdate         // ← Week 4: WebSocket
+                            tradeEventPublisher::publish,
+                            marketDataPublisher::publishOrderBook  // ← REAL publisher
                     );
                     reloadOpenOrders(instrument.getSymbol());
                 });
@@ -53,19 +54,12 @@ public class EngineInitializer implements ApplicationRunner {
                     .type(EngineOrder.Type.valueOf(order.getType().name()))
                     .price(order.getPrice())
                     .remainingQty(order.getRemainingQty())
-                    .timestamp(order.getCreatedAt())
+                    .timestamp(order.getCreatedAt() != null
+                            ? order.getCreatedAt() : Instant.now())
                     .build();
             engine.getOrderBook().addOrder(engineOrder);
         });
 
         log.info("Reloaded {} open orders for {}", openOrders.size(), symbol);
-    }
-
-    private void handleBookUpdate(OrderBookUpdateEvent event) {
-        // Week 4: replace with WebSocket publisher
-        log.debug("Book update: {} bids={} asks={}",
-                event.getSymbol(),
-                event.getBids().size(),
-                event.getAsks().size());
     }
 }

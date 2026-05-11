@@ -3,6 +3,8 @@ package com.project.ome.publisher;
 
 import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.engine.model.TradeEvent;
+import com.project.ome.marketdata.MarketDataPublisher;
+import com.project.ome.marketdata.dto.OrderUpdateMessage;
 import com.project.ome.shared.entity.*;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -23,54 +25,91 @@ public class TradeEventConsumer {
     private final OrderRepository      orderRepository;
     private final InstrumentRepository instrumentRepository;
     private final AccountRepository    accountRepository;
+    private final MarketDataPublisher marketDataPublisher;
 
     @KafkaListener(
-        topics   = "${app.kafka.topics.trade-executed}",
-        groupId  = "trade-persistence-group"
-    )
-    @Transactional
-    public void consume(TradeEvent event) {
-        log.info("Persisting trade: {} {} @ {} qty={}",
-                event.getTradeId(), event.getSymbol(),
-                event.getPrice(), event.getQuantity());
+    topics   = "${app.kafka.topics.trade-executed}",
+    groupId  = "trade-persistence-group"
+)
+@Transactional
+public void consume(TradeEvent event) {
+    log.info("Persisting trade: {} {} @ {} qty={}",
+            event.getTradeId(), event.getSymbol(),
+            event.getPrice(), event.getQuantity());
 
-        // Bug #11 fix: Let exceptions propagate so Spring Kafka can retry / DLT.
-        // The @Transactional will roll back on failure automatically.
+    // 1. Find instrument
+    Instrument instrument = instrumentRepository.findBySymbol(event.getSymbol())
+            .orElseThrow(() -> new IllegalArgumentException(
+                    "Instrument not found: " + event.getSymbol()));
 
-        // 1. Find the instrument reference
-        Instrument instrument = instrumentRepository.findBySymbol(event.getSymbol())
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Instrument not found: " + event.getSymbol()));
+    // 2. Persist trade
+    Trade trade = Trade.builder()
+            .instrument(instrument)
+            .price(event.getPrice())
+            .quantity(event.getQuantity())
+            .executedAt(event.getExecutedAt())
+            .build();
+    Trade savedTrade = tradeRepository.save(trade);
 
-        // 2. Persist the trade
-        Trade trade = Trade.builder()
-                .instrument(instrument)
-                .price(event.getPrice())
-                .quantity(event.getQuantity())
-                .executedAt(event.getExecutedAt())
-                .build();
-        Trade savedTrade = tradeRepository.save(trade);
+    // 3. Persist aggressor leg
+    persistLeg(savedTrade, event.getAggressorOrderId(),
+               event.getAggressorSide(), event);
 
-        // 3. Persist aggressor leg
-        persistLeg(savedTrade, event.getAggressorOrderId(),
-                   event.getAggressorSide(), event);
+    // 4. Persist resting leg
+    Order.Side restingSide = event.getAggressorSide() == EngineOrder.Side.BUY
+            ? Order.Side.SELL : Order.Side.BUY;
+    persistRestingLeg(savedTrade, event.getRestingOrderId(), restingSide, event);
 
-        // 4. Persist resting leg (opposite side)
-        Order.Side restingSide = event.getAggressorSide()
-                == EngineOrder.Side.BUY
-                ? Order.Side.SELL : Order.Side.BUY;
-        persistRestingLeg(savedTrade, event.getRestingOrderId(),
-                           restingSide, event);
+    // 5. Update order statuses
+    updateOrderStatus(event.getAggressorOrderId(), event);
+    updateOrderStatus(event.getRestingOrderId(), event);
 
-        // 5. Update order statuses
-        updateOrderStatus(event.getAggressorOrderId(), event);
-        updateOrderStatus(event.getRestingOrderId(), event);
+    // 6. Settle balances
+    settleBalances(event, instrument);
 
-        // 6. Bug #4 fix: Settle balances — move money between accounts
-        settleBalances(event, instrument);
+    // 7. Publish WebSocket trade + order fill notifications  ← INSIDE consume()
+    marketDataPublisher.publishTrade(event);
+    publishOrderFillNotifications(event);
 
-        log.info("Trade {} fully persisted and settled", event.getTradeId());
-    }
+    log.info("Trade {} fully persisted and settled", event.getTradeId());
+}
+
+   private void publishOrderFillNotifications(TradeEvent event) {
+    // Notify aggressor
+    orderRepository.findById(event.getAggressorOrderId())
+            .ifPresent(order -> {
+                OrderUpdateMessage msg = OrderUpdateMessage.builder()
+                        .orderId(order.getId())
+                        .symbol(event.getSymbol())
+                        .status(order.getStatus().name())
+                        .filledQty(order.getFilledQty())
+                        .remainingQty(order.getRemainingQty())
+                        .lastFillPrice(event.getPrice())
+                        .timestamp(event.getExecutedAt())
+                        .build();
+                marketDataPublisher.publishOrderUpdate(
+                        event.getAggressorUserId().toString(), msg);
+            });
+
+    // Notify resting order owner
+    orderRepository.findById(event.getRestingOrderId())
+            .ifPresent(order -> {
+                OrderUpdateMessage msg = OrderUpdateMessage.builder()
+                        .orderId(order.getId())
+                        .symbol(event.getSymbol())
+                        .status(order.getStatus().name())
+                        .filledQty(order.getFilledQty())
+                        .remainingQty(order.getRemainingQty())
+                        .lastFillPrice(event.getPrice())
+                        .timestamp(event.getExecutedAt())
+                        .build();
+                marketDataPublisher.publishOrderUpdate(
+                        event.getRestingUserId().toString(), msg);
+            });
+
+    log.info("Order fill notifications sent for aggressor={} resting={}",
+            event.getAggressorOrderId(), event.getRestingOrderId());
+}
 
     private void persistLeg(Trade trade, UUID orderId,
                         EngineOrder.Side side, TradeEvent event) {

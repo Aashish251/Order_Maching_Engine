@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>OME — Live Market Data</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+  <style>
+    body { font-family: monospace; background: #0d1117; color: #e6edf3; padding: 20px; }
+    h2 { color: #58a6ff; }
+    .panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin: 12px 0; }
+    .bid { color: #3fb950; }
+    .ask { color: #f85149; }
+    .trade { color: #d2a8ff; }
+    #status { padding: 8px; border-radius: 4px; display: inline-block; }
+    .connected { background: #1a4731; color: #3fb950; }
+    .disconnected { background: #3d1f1f; color: #f85149; }
+    input, button { background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+                    padding: 8px 12px; border-radius: 6px; margin: 4px; }
+    button { cursor: pointer; background: #1f6feb; border-color: #388bfd; }
+    button:hover { background: #388bfd; }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { padding: 6px 12px; text-align: left; border-bottom: 1px solid #21262d; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<h2>⚡ Order Matching Engine — Live Dashboard</h2>
+
+<div class="panel">
+  <label>JWT Token: </label>
+  <input id="token" placeholder="paste your Bearer token here" style="width:400px"/>
+  <label> Symbol: </label>
+  <input id="symbol" value="BTC-USD" style="width:100px"/>
+  <button onclick="connect()">Connect</button>
+  <button onclick="disconnect()">Disconnect</button>
+  <span id="status" class="disconnected"> ● Disconnected</span>
+</div>
+
+<div style="display:flex; gap:16px;">
+  <div class="panel" style="flex:1">
+    <h3>📊 Order Book</h3>
+    <table>
+      <tr><th>Side</th><th>Price</th><th>Quantity</th><th>Orders</th></tr>
+      <tbody id="orderbook">
+        <tr><td colspan="4" style="color:#8b949e">Not connected</td></tr>
+      </tbody>
+    </table>
+    <div style="font-size:11px; color:#8b949e; margin-top:8px">
+      Seq: <span id="seq">—</span>
+    </div>
+  </div>
+
+  <div class="panel" style="flex:1">
+    <h3>🔄 Recent Trades</h3>
+    <table>
+      <tr><th>Symbol</th><th>Price</th><th>Qty</th><th>Side</th><th>Time</th></tr>
+      <tbody id="trades">
+        <tr><td colspan="5" style="color:#8b949e">Waiting for trades...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h3>🔔 My Order Fills</h3>
+  <table>
+    <tr><th>Order ID</th><th>Symbol</th><th>Status</th><th>Filled</th><th>Price</th></tr>
+    <tbody id="fills">
+      <tr><td colspan="5" style="color:#8b949e">No fills yet...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+  let stompClient = null;
+
+  function connect() {
+    const token  = document.getElementById('token').value.trim();
+    const symbol = document.getElementById('symbol').value.trim();
+
+    const socket = new SockJS('http://localhost:8080/ws');
+    stompClient  = Stomp.over(socket);
+    stompClient.debug = () => {};  // silence debug logs
+
+    const headers = token ? { Authorization: 'Bearer ' + token } : {};
+
+    stompClient.connect(headers, () => {
+      document.getElementById('status').className = 'connected';
+      document.getElementById('status').textContent = ' ● Connected';
+
+      // Subscribe to order book updates
+      stompClient.subscribe('/topic/' + symbol + '/orderbook', msg => {
+        const data = JSON.parse(msg.body);
+        renderOrderBook(data);
+      });
+
+      // Subscribe to trade feed
+      stompClient.subscribe('/topic/' + symbol + '/trades', msg => {
+        const data = JSON.parse(msg.body);
+        renderTrade(data);
+      });
+
+      // Subscribe to private order fill notifications
+      if (token) {
+        stompClient.subscribe('/user/queue/orders', msg => {
+          const data = JSON.parse(msg.body);
+          renderFill(data);
+        });
+      }
+
+    }, err => {
+      document.getElementById('status').className = 'disconnected';
+      document.getElementById('status').textContent = ' ● Error: ' + err;
+    });
+  }
+
+  function disconnect() {
+    if (stompClient) stompClient.disconnect();
+    document.getElementById('status').className = 'disconnected';
+    document.getElementById('status').textContent = ' ● Disconnected';
+  }
+
+  function renderOrderBook(data) {
+    document.getElementById('seq').textContent = data.sequence;
+    const tbody = document.getElementById('orderbook');
+    tbody.innerHTML = '';
+
+    (data.asks || []).slice().reverse().forEach(l => {
+      tbody.innerHTML += `<tr class="ask">
+        <td>ASK</td>
+        <td>${parseFloat(l.price).toFixed(2)}</td>
+        <td>${parseFloat(l.quantity).toFixed(5)}</td>
+        <td>${l.orderCount}</td>
+      </tr>`;
+    });
+
+    // Spread indicator
+    if (data.bids?.length && data.asks?.length) {
+      const spread = (data.asks[0].price - data.bids[0].price).toFixed(2);
+      tbody.innerHTML += `<tr><td colspan="4" style="text-align:center;color:#8b949e;font-size:11px">
+        ── spread: ${spread} ──</td></tr>`;
+    }
+
+    (data.bids || []).forEach(l => {
+      tbody.innerHTML += `<tr class="bid">
+        <td>BID</td>
+        <td>${parseFloat(l.price).toFixed(2)}</td>
+        <td>${parseFloat(l.quantity).toFixed(5)}</td>
+        <td>${l.orderCount}</td>
+      </tr>`;
+    });
+  }
+
+  function renderTrade(data) {
+    const tbody = document.getElementById('trades');
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+    const time = new Date(data.executedAt).toLocaleTimeString();
+    const cls  = data.side === 'BUY' ? 'bid' : 'ask';
+    tbody.innerHTML = `<tr class="${cls}">
+      <td>${data.symbol}</td>
+      <td>${parseFloat(data.price).toFixed(2)}</td>
+      <td>${parseFloat(data.quantity).toFixed(5)}</td>
+      <td>${data.side}</td>
+      <td>${time}</td>
+    </tr>` + tbody.innerHTML;
+
+    // Keep only last 20 trades
+    const rows = tbody.querySelectorAll('tr');
+    if (rows.length > 20) rows[rows.length - 1].remove();
+  }
+
+  function renderFill(data) {
+    const tbody = document.getElementById('fills');
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+    const short = data.orderId.substring(0, 8) + '...';
+    tbody.innerHTML = `<tr>
+      <td title="${data.orderId}">${short}</td>
+      <td>${data.symbol}</td>
+      <td style="color:${data.status==='FILLED'?'#3fb950':'#d2a8ff'}">${data.status}</td>
+      <td>${parseFloat(data.filledQty).toFixed(5)}</td>
+      <td>${parseFloat(data.lastFillPrice).toFixed(2)}</td>
+    </tr>` + tbody.innerHTML;
+  }
+</script>
+</body>
+</html>

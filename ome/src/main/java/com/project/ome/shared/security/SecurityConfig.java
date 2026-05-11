@@ -29,14 +29,16 @@ public class SecurityConfig {
             .sessionManagement(session ->
                 session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                // Public endpoints
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/api/v1/ping").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
                 .requestMatchers("/actuator/prometheus").permitAll()
                 .requestMatchers("/api/v1/market/**").permitAll()
                 .requestMatchers("/ws/**").permitAll()
-                // Everything else requires authentication
+                .requestMatchers("/dashboard.html").permitAll()  
+                .requestMatchers("/**.html").permitAll()          
+                .requestMatchers("/**.js").permitAll()             
+                .requestMatchers("/**.css").permitAll()            
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthFilter,

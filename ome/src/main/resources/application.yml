@@ -4,9 +4,9 @@ spring:
 
   # ── Database ──────────────────────────────────────────────
   datasource:
-    url: jdbc:postgresql://localhost:5432/ome_db
-    username: ome_user
-    password: ome_pass
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ome_db}
+    username: ${DB_USERNAME:ome_user}
+    password: ${DB_PASSWORD:ome_pass}
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -16,14 +16,14 @@ spring:
       pool-name: OME-HikariPool
 
   jpa:
-    open-in-view: false       
+    open-in-view: false
     hibernate:
       ddl-auto: validate
-      show-sql: false
-      properties:
+    show-sql: false
+    properties:
       hibernate:
-      format_sql: true
-      default_schema: public
+        format_sql: true
+        default_schema: public
 
   # ── Flyway ────────────────────────────────────────────────
   flyway:
@@ -35,9 +35,9 @@ spring:
   # ── Redis ─────────────────────────────────────────────────
   data:
     redis:
-      host: localhost
-      port: 6379
-      password: ome_redis_pass
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:ome_redis_pass}
       lettuce:
         pool:
           max-active: 16
@@ -47,11 +47,11 @@ spring:
 
   # ── Kafka ─────────────────────────────────────────────────
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      acks: 1
+      acks: all
       retries: 3
       properties:
         enable.idempotence: true
@@ -59,15 +59,18 @@ spring:
       group-id: ome-consumer-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
         spring.json.trusted.packages: "com.project.*"
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.value.default.type: com.project.ome.engine.model.TradeEvent
+        spring.json.use.type.headers: false
 
   # ── Security (disable default for now) ───────────────────
   security:
     user:
       name: admin
-      password: admin
+      password: ${SPRING_SECURITY_PASSWORD:admin}
 
 # ── Server ────────────────────────────────────────────────
 server:
@@ -92,7 +95,7 @@ management:
 # ── App custom config ──────────────────────────────────────
 app:
   jwt:
-    secret: "404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970"
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
     expiration-ms: 86400000   # 24 hours
   matching-engine:
     instruments:

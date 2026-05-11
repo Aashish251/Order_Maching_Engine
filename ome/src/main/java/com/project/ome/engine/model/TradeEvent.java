@@ -6,23 +6,25 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Getter
+@Setter
 @Builder
+@NoArgsConstructor
 @AllArgsConstructor
 public class TradeEvent {
 
-    private final UUID             tradeId;
-    private final String           symbol;
+    private UUID             tradeId;
+    private String           symbol;
 
     // Aggressor = the incoming order that caused the match
-    private final UUID             aggressorOrderId;
-    private final UUID             aggressorUserId;
-    private final EngineOrder.Side aggressorSide;   // ← ONE field, ONE type
+    private UUID             aggressorOrderId;
+    private UUID             aggressorUserId;
+    private EngineOrder.Side aggressorSide;
 
     // Resting = the order that was sitting in the book
-    private final UUID             restingOrderId;
-    private final UUID             restingUserId;
+    private UUID             restingOrderId;
+    private UUID             restingUserId;
 
-    private final BigDecimal       price;
-    private final BigDecimal       quantity;
-    private final Instant          executedAt;
+    private BigDecimal       price;
+    private BigDecimal       quantity;
+    private Instant          executedAt;
 }

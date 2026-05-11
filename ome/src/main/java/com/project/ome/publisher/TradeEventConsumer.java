@@ -3,7 +3,6 @@ package com.project.ome.publisher;
 
 import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.engine.model.TradeEvent;
-import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.shared.entity.*;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 @Slf4j
@@ -18,10 +18,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TradeEventConsumer {
 
-    private final TradeRepository    tradeRepository;
-    private final TradeLegRepository tradeLegRepository;
-    private final OrderRepository    orderRepository;
+    private final TradeRepository      tradeRepository;
+    private final TradeLegRepository   tradeLegRepository;
+    private final OrderRepository      orderRepository;
     private final InstrumentRepository instrumentRepository;
+    private final AccountRepository    accountRepository;
 
     @KafkaListener(
         topics   = "${app.kafka.topics.trade-executed}",
@@ -33,57 +34,59 @@ public class TradeEventConsumer {
                 event.getTradeId(), event.getSymbol(),
                 event.getPrice(), event.getQuantity());
 
-        try {
-            // 1. Find the instrument reference
-            Instrument instrument = new Instrument();
-            instrument.setId(resolveInstrumentId(event.getSymbol()));
+        // Bug #11 fix: Let exceptions propagate so Spring Kafka can retry / DLT.
+        // The @Transactional will roll back on failure automatically.
 
-            // 2. Persist the trade
-            Trade trade = Trade.builder()
-                    .instrument(instrument)
-                    .price(event.getPrice())
-                    .quantity(event.getQuantity())
-                    .executedAt(event.getExecutedAt())
-                    .build();
-            Trade savedTrade = tradeRepository.save(trade);
+        // 1. Find the instrument reference
+        Instrument instrument = instrumentRepository.findBySymbol(event.getSymbol())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Instrument not found: " + event.getSymbol()));
 
-            // 3. Persist aggressor leg
-            persistLeg(savedTrade, event.getAggressorOrderId(),
-                       event.getAggressorSide(), event);
+        // 2. Persist the trade
+        Trade trade = Trade.builder()
+                .instrument(instrument)
+                .price(event.getPrice())
+                .quantity(event.getQuantity())
+                .executedAt(event.getExecutedAt())
+                .build();
+        Trade savedTrade = tradeRepository.save(trade);
 
-            // 4. Persist resting leg (opposite side)
-            Order.Side restingSide = event.getAggressorSide()
-                    == EngineOrder.Side.BUY                // ← CORRECT
-                    ? Order.Side.SELL : Order.Side.BUY;
-            persistRestingLeg(savedTrade, event.getRestingOrderId(),
-                               restingSide, event);
+        // 3. Persist aggressor leg
+        persistLeg(savedTrade, event.getAggressorOrderId(),
+                   event.getAggressorSide(), event);
 
-            // 5. Update order statuses
-            updateOrderStatus(event.getAggressorOrderId(), event);
-            updateOrderStatus(event.getRestingOrderId(), event);
+        // 4. Persist resting leg (opposite side)
+        Order.Side restingSide = event.getAggressorSide()
+                == EngineOrder.Side.BUY
+                ? Order.Side.SELL : Order.Side.BUY;
+        persistRestingLeg(savedTrade, event.getRestingOrderId(),
+                           restingSide, event);
 
-        } catch (Exception e) {
-            log.error("Failed to persist trade {}: {}",
-                    event.getTradeId(), e.getMessage(), e);
-            // In production: push to dead letter topic
-        }
+        // 5. Update order statuses
+        updateOrderStatus(event.getAggressorOrderId(), event);
+        updateOrderStatus(event.getRestingOrderId(), event);
+
+        // 6. Bug #4 fix: Settle balances — move money between accounts
+        settleBalances(event, instrument);
+
+        log.info("Trade {} fully persisted and settled", event.getTradeId());
     }
 
     private void persistLeg(Trade trade, UUID orderId,
-                        EngineOrder.Side side, TradeEvent event) {   // ← changed here
-    Order orderRef = new Order();
-    orderRef.setId(orderId);
+                        EngineOrder.Side side, TradeEvent event) {
+        Order orderRef = new Order();
+        orderRef.setId(orderId);
 
-    TradeLeg leg = TradeLeg.builder()
-            .trade(trade)
-            .order(orderRef)
-            .side(side == EngineOrder.Side.BUY                       // ← changed here
-                    ? Order.Side.BUY : Order.Side.SELL)
-            .quantity(event.getQuantity())
-            .price(event.getPrice())
-            .build();
-    tradeLegRepository.save(leg);
-}
+        TradeLeg leg = TradeLeg.builder()
+                .trade(trade)
+                .order(orderRef)
+                .side(side == EngineOrder.Side.BUY
+                        ? Order.Side.BUY : Order.Side.SELL)
+                .quantity(event.getQuantity())
+                .price(event.getPrice())
+                .build();
+        tradeLegRepository.save(leg);
+    }
 
     private void persistRestingLeg(Trade trade, UUID orderId,
                                    Order.Side side, TradeEvent event) {
@@ -107,10 +110,62 @@ public class TradeEventConsumer {
         });
     }
 
-    private UUID resolveInstrumentId(String symbol) {
-    return instrumentRepository.findBySymbol(symbol)
-            .orElseThrow(() -> new IllegalArgumentException(
-                    "Instrument not found: " + symbol))
-            .getId();
+    /**
+     * Bug #4 fix: Settle the financial balances for both parties after a trade.
+     *
+     * Buyer side:
+     *   - Deduct quote currency (e.g. USD) from reserved balance
+     *   - Credit base currency (e.g. BTC) to available balance
+     *
+     * Seller side:
+     *   - Deduct base currency (e.g. BTC) from reserved balance
+     *   - Credit quote currency (e.g. USD) to available balance
+     */
+    private void settleBalances(TradeEvent event, Instrument instrument) {
+        BigDecimal cost = event.getPrice().multiply(event.getQuantity());
+
+        UUID buyerId;
+        UUID sellerId;
+
+        if (event.getAggressorSide() == EngineOrder.Side.BUY) {
+            buyerId  = event.getAggressorUserId();
+            sellerId = event.getRestingUserId();
+        } else {
+            buyerId  = event.getRestingUserId();
+            sellerId = event.getAggressorUserId();
+        }
+
+        // Buyer: deduct quote currency from reserved, credit base currency
+        accountRepository.findByUserIdAndCurrencyForUpdate(
+                buyerId, instrument.getQuoteCurrency())
+            .ifPresent(acc -> {
+                acc.deductReserved(cost);
+                accountRepository.save(acc);
+            });
+
+        accountRepository.findByUserIdAndCurrencyForUpdate(
+                buyerId, instrument.getBaseCurrency())
+            .ifPresent(acc -> {
+                acc.credit(event.getQuantity());
+                accountRepository.save(acc);
+            });
+
+        // Seller: deduct base currency from reserved, credit quote currency
+        accountRepository.findByUserIdAndCurrencyForUpdate(
+                sellerId, instrument.getBaseCurrency())
+            .ifPresent(acc -> {
+                acc.deductReserved(event.getQuantity());
+                accountRepository.save(acc);
+            });
+
+        accountRepository.findByUserIdAndCurrencyForUpdate(
+                sellerId, instrument.getQuoteCurrency())
+            .ifPresent(acc -> {
+                acc.credit(cost);
+                accountRepository.save(acc);
+            });
+
+        log.info("Balances settled: buyer={} seller={} cost={} qty={}",
+                buyerId, sellerId, cost, event.getQuantity());
     }
 }

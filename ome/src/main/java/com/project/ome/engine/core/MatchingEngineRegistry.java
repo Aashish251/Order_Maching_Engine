@@ -16,9 +16,6 @@ public class MatchingEngineRegistry {
     private final Map<String, MatchingEngine> engines =
             new ConcurrentHashMap<>();
 
-    private Consumer<TradeEvent>           tradeHandler;
-    private Consumer<OrderBookUpdateEvent> bookUpdateHandler;
-
     // Called on app startup for each instrument
     public void registerInstrument(String symbol,
                                    Consumer<TradeEvent> onTrade,

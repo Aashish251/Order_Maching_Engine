@@ -144,15 +144,22 @@ public class OrderService {
                 BigDecimal amount;
 
                 if (req.getSide() == OrderSide.BUY) {
-                        // MARKET orders won't have a price — use a high estimate
-                        // LIMIT orders must have price (validated by @ValidOrder)
-                        if (req.getPrice() == null) {
-                                throw new BusinessException(
-                                                "PRICE_REQUIRED",
-                                                "Price is required for BUY orders",
-                                                org.springframework.http.HttpStatus.BAD_REQUEST);
+                        if (req.getType() == OrderType.MARKET) {
+                                // MARKET buys: estimate cost from current best ask + 5% slippage
+                                BigDecimal bestAsk = engineRegistry.getEngine(req.getSymbol())
+                                                .getOrderBook().getBestAsk();
+                                if (bestAsk == null) {
+                                        throw new BusinessException(
+                                                        "NO_LIQUIDITY",
+                                                        "No asks available for MARKET order",
+                                                        org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY);
+                                }
+                                amount = bestAsk.multiply(req.getQuantity())
+                                                .multiply(new BigDecimal("1.05"));
+                        } else {
+                                // LIMIT orders must have price (validated by @ValidOrder)
+                                amount = req.getPrice().multiply(req.getQuantity());
                         }
-                        amount = req.getPrice().multiply(req.getQuantity());
                 } else {
                         amount = req.getQuantity();
                 }

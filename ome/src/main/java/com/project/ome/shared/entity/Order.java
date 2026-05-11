@@ -50,6 +50,13 @@ public class Order extends BaseEntity {
     @Column(name = "avg_fill_price", precision = 20, scale = 8)
     private BigDecimal avgFillPrice;
 
+    // Bug #5 fix: remaining_qty is a GENERATED ALWAYS column in the DB.
+    // We map it read-only so Hibernate validation passes and JPA never
+    // attempts to INSERT/UPDATE this column.
+    @Column(name = "remaining_qty", insertable = false, updatable = false,
+            precision = 20, scale = 8)
+    private BigDecimal remainingQty;
+
     // ── Enums ──────────────────────────────────────────────────
     public enum Side   { BUY, SELL }
     public enum Type   { LIMIT, MARKET, STOP }
@@ -59,7 +66,14 @@ public class Order extends BaseEntity {
     }
 
     // ── Derived helpers ────────────────────────────────────────
+    /**
+     * Returns the remaining quantity. Prefers the DB-computed value if available,
+     * otherwise computes it from quantity - filledQty (for transient/new entities).
+     */
     public BigDecimal getRemainingQty() {
+        if (remainingQty != null) {
+            return remainingQty;
+        }
         return quantity.subtract(filledQty);
     }
 

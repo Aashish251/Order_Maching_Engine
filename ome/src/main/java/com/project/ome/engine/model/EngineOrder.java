@@ -2,6 +2,7 @@
 package com.project.ome.engine.model;
 
 import lombok.*;
+import lombok.extern.slf4j.Slf4j;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import java.util.UUID;
 @Getter
 @Builder
 @AllArgsConstructor
+@Slf4j
 public class EngineOrder {
 
     private final UUID       orderId;
@@ -26,9 +28,14 @@ public class EngineOrder {
 
     public void reduceQuantity(BigDecimal fillQty) {
         this.remainingQty = this.remainingQty.subtract(fillQty);
+        if (this.remainingQty.compareTo(BigDecimal.ZERO) < 0) {
+            log.error("CRITICAL: remainingQty went negative for order {}: {}",
+                    orderId, remainingQty);
+            this.remainingQty = BigDecimal.ZERO;  // defensive clamp
+        }
     }
 
     public boolean isFilled() {
-        return remainingQty.compareTo(BigDecimal.ZERO) == 0;
+        return remainingQty.compareTo(BigDecimal.ZERO) <= 0;
     }
 }

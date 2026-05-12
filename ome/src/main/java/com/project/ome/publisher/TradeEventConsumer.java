@@ -5,6 +5,7 @@ import com.project.ome.engine.model.EngineOrder;
 import com.project.ome.engine.model.TradeEvent;
 import com.project.ome.marketdata.MarketDataPublisher;
 import com.project.ome.marketdata.dto.OrderUpdateMessage;
+import com.project.ome.shared.cache.AccountCacheService;
 import com.project.ome.shared.entity.*;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ public class TradeEventConsumer {
     private final InstrumentRepository instrumentRepository;
     private final AccountRepository    accountRepository;
     private final MarketDataPublisher marketDataPublisher;
+    private final AccountCacheService accountCacheService;
 
     @KafkaListener(
     topics   = "${app.kafka.topics.trade-executed}",
@@ -149,17 +151,6 @@ public void consume(TradeEvent event) {
         });
     }
 
-    /**
-     * Bug #4 fix: Settle the financial balances for both parties after a trade.
-     *
-     * Buyer side:
-     *   - Deduct quote currency (e.g. USD) from reserved balance
-     *   - Credit base currency (e.g. BTC) to available balance
-     *
-     * Seller side:
-     *   - Deduct base currency (e.g. BTC) from reserved balance
-     *   - Credit quote currency (e.g. USD) to available balance
-     */
     private void settleBalances(TradeEvent event, Instrument instrument) {
         BigDecimal cost = event.getPrice().multiply(event.getQuantity());
 
@@ -206,5 +197,9 @@ public void consume(TradeEvent event) {
 
         log.info("Balances settled: buyer={} seller={} cost={} qty={}",
                 buyerId, sellerId, cost, event.getQuantity());
+
+        accountCacheService.invalidateAll(buyerId);
+        accountCacheService.invalidateAll(sellerId);
+        log.debug("Balance cache invalidated for buyer={} seller={}", buyerId, sellerId);
     }
 }

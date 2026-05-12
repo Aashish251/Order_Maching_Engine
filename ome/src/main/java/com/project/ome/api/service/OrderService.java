@@ -5,9 +5,11 @@ import com.project.ome.api.dto.order.*;
 import com.project.ome.engine.core.MatchingEngineRegistry;
 import com.project.ome.engine.disruptor.EngineGateway;
 import com.project.ome.engine.model.EngineOrder;
+import com.project.ome.shared.cache.InstrumentCacheService;
 import com.project.ome.shared.dto.PageResponse;
 import com.project.ome.shared.entity.*;
 import com.project.ome.shared.exception.*;
+import com.project.ome.shared.ratelimit.RateLimitService;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,69 +18,89 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.UUID;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
 
-        private final OrderRepository orderRepository;
-        private final AccountRepository accountRepository;
-        private final InstrumentRepository instrumentRepository;
-        private final EngineGateway engineGateway;
+        private final OrderRepository        orderRepository;
+        private final AccountRepository      accountRepository;
+        private final InstrumentRepository   instrumentRepository; 
+        private final EngineGateway          engineGateway;
         private final MatchingEngineRegistry engineRegistry;
+        private final RateLimitService       rateLimitService;
+        private final InstrumentCacheService instrumentCacheService;
+
 
         @Transactional
+        @CircuitBreaker(name = "orderService", fallbackMethod = "placeOrderFallback")
+        @Retry(name = "orderService")
         public OrderResponse placeOrder(PlaceOrderRequest request, UUID userId) {
 
-                // 1. Idempotency check — same clientOrderId = return existing order
-                if (request.getClientOrderId() != null) {
-                        var existing = orderRepository
-                                        .findByClientOrderId(request.getClientOrderId());
-                        if (existing.isPresent()) {
-                                log.info("Duplicate order detected, returning existing: {}",
-                                                request.getClientOrderId());
-                                return toResponse(existing.get());
-                        }
-                }
-
-                // 2. Validate instrument
-                Instrument instrument = instrumentRepository
-                                .findBySymbol(request.getSymbol())
-                                .orElseThrow(() -> new ResourceNotFoundException(
-                                                "Instrument", request.getSymbol()));
-
-                if (!instrument.isTradingEnabled()) {
-                        throw BusinessException.instrumentDisabled(request.getSymbol());
-                }
-
-                // 3. Validate and reserve balance
-                User userRef = new User();
-                userRef.setId(userId); // proxy — avoid full user load
-
-                reserveBalance(userId, request, instrument);
-
-                // 4. Persist order as PENDING
-                Order order = Order.builder()
-                                .user(userRef)
-                                .instrument(instrument)
-                                .clientOrderId(request.getClientOrderId())
-                                .side(Order.Side.valueOf(request.getSide().name()))
-                                .type(Order.Type.valueOf(request.getType().name()))
-                                .quantity(request.getQuantity())
-                                .price(request.getPrice())
-                                .status(Order.Status.PENDING)
-                                .build();
-
-                Order saved = orderRepository.save(order);
-                log.info("Order placed: {} {} {} @ {} qty={}",
-                                saved.getId(), saved.getSide(), saved.getInstrument().getSymbol(),
-                                saved.getPrice(), saved.getQuantity());
-
-                submitToEngine(saved);
-                return toResponse(saved);
+        // 0. Rate limit check
+        if (!rateLimitService.isOrderAllowed(userId.toString())) {
+                throw BusinessException.rateLimitExceeded();
         }
 
+        // 1. Idempotency check
+        if (request.getClientOrderId() != null) {
+                var existing = orderRepository
+                        .findByClientOrderId(request.getClientOrderId());
+                if (existing.isPresent()) {
+                log.info("Duplicate order detected, returning existing: {}",
+                        request.getClientOrderId());
+                return toResponse(existing.get());
+                }
+        }
+
+        // 2. Validate instrument — uses CACHE (L1 Caffeine → L2 Redis → DB)
+        Instrument instrument = instrumentCacheService
+                .findBySymbol(request.getSymbol())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Instrument", request.getSymbol()));
+
+        if (!instrument.isTradingEnabled()) {
+                throw BusinessException.instrumentDisabled(request.getSymbol());
+        }
+
+        // 3. Reserve balance
+        User userRef = new User();
+        userRef.setId(userId);
+        reserveBalance(userId, request, instrument);
+
+        // 4. Persist order as PENDING
+        Order order = Order.builder()
+                .user(userRef)
+                .instrument(instrument)
+                .clientOrderId(request.getClientOrderId())
+                .side(Order.Side.valueOf(request.getSide().name()))
+                .type(Order.Type.valueOf(request.getType().name()))
+                .quantity(request.getQuantity())
+                .price(request.getPrice())
+                .status(Order.Status.PENDING)
+                .build();
+
+        Order saved = orderRepository.save(order);
+        log.info("Order placed: {} {} {} @ {} qty={}",
+                saved.getId(), saved.getSide(),
+                saved.getInstrument().getSymbol(),
+                saved.getPrice(), saved.getQuantity());
+
+        // 5. Submit to engine
+        submitToEngine(saved);
+        return toResponse(saved);
+        }
+        private OrderResponse placeOrderFallback(PlaceOrderRequest request,UUID userId, Exception ex) {
+                log.error("Order service circuit open for user {}: {}",
+                        userId, ex.getMessage());
+                        throw new BusinessException(
+                "SERVICE_UNAVAILABLE",
+                "Order service temporarily unavailable. Please try again.",
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
+        }
         @Transactional(readOnly = true)
         public OrderResponse getOrder(UUID orderId, UUID userId) {
                 Order order = orderRepository.findByIdAndUserId(orderId, userId)

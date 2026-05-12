@@ -6,6 +6,7 @@ import com.project.ome.shared.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.*;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
@@ -18,6 +19,7 @@ public class OrderController {
     private final OrderService orderService;
 
     @PostMapping
+    @PreAuthorize("hasAnyRole('ROLE_TRADER', 'ROLE_MARKET_MAKER')")
     public ResponseEntity<ApiResponse<OrderResponse>> placeOrder(
             @Valid @RequestBody PlaceOrderRequest request,
             @AuthenticationPrincipal UUID userId) { // ← from JWT filter
@@ -25,6 +27,7 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.ACCEPTED)
                 .body(ApiResponse.ok("Order accepted for matching", response));
     }
+
 
     @GetMapping("/{orderId}")
     public ResponseEntity<ApiResponse<OrderResponse>> getOrder(
@@ -44,6 +47,7 @@ public class OrderController {
     }
 
     @DeleteMapping("/{orderId}")
+    @PreAuthorize("hasAnyRole('ROLE_TRADER', 'ROLE_MARKET_MAKER')")
     public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(
             @PathVariable UUID orderId,
             @AuthenticationPrincipal UUID userId) {

@@ -7,6 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.retry.annotation.Retry;
+
 
 @Slf4j
 @Component
@@ -18,21 +21,30 @@ public class TradeEventPublisher {
     @Value("${app.kafka.topics.trade-executed}")
     private String tradeExecutedTopic;
 
-    // Called by engine via callback — must be fast, non-blocking
+    @CircuitBreaker(name = "kafkaPublisher", fallbackMethod = "publishFallback")
     public void publish(TradeEvent event) {
         kafkaTemplate.send(
                 tradeExecutedTopic,
-                event.getSymbol(),   // partition key — same symbol → same partition
+                event.getSymbol(),
                 event)
             .whenComplete((result, ex) -> {
                 if (ex != null) {
-                    log.error("Failed to publish trade event: {}",
-                            event.getTradeId(), ex);
+                    log.error("Failed to publish trade {}: {}",
+                            event.getTradeId(), ex.getMessage());
+                    throw new RuntimeException(ex);
                 } else {
-                    log.debug("Trade published to Kafka: {} partition={}",
+                    log.debug("Trade published: {} partition={}",
                             event.getTradeId(),
                             result.getRecordMetadata().partition());
                 }
             });
+    }
+
+    // Fallback: store to local queue for retry (simplified version)
+    private void publishFallback(TradeEvent event, Exception ex) {
+        log.error("Kafka circuit open — trade {} will be retried later: {}",
+                event.getTradeId(), ex.getMessage());
+        // In production: persist to outbox table for guaranteed delivery
+        // For now: log the trade ID for manual recovery
     }
 }

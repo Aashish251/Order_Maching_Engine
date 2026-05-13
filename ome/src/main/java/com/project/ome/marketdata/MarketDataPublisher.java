@@ -1,11 +1,12 @@
 // src/main/java/com/project/ome/marketdata/MarketDataPublisher.java
 package com.project.ome.marketdata;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.project.ome.engine.model.OrderBookUpdateEvent;
 import com.project.ome.engine.model.TradeEvent;
 import com.project.ome.marketdata.dto.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +18,8 @@ import java.util.stream.Collectors;
 public class MarketDataPublisher {
 
     private final SimpMessagingTemplate messagingTemplate;
+    private final ObjectMapper          objectMapper;
+    private final RedisTemplate<String, Object> redisTemplate;
 
     // ── Called by EngineInitializer on every order book change ──
     public void publishOrderBook(OrderBookUpdateEvent event) {
@@ -41,13 +44,17 @@ public class MarketDataPublisher {
                 .build();
 
         // Broadcast to all subscribers of this symbol's order book
-        String destination = "/topic/" + event.getSymbol() + "/orderbook";
-        messagingTemplate.convertAndSend(destination, message);
-
-        log.debug("Order book published: {} bids={} asks={}",
-                event.getSymbol(),
-                event.getBids().size(),
-                event.getAsks().size());
+        try {
+            // Publish to Redis — all nodes pick this up and push to their WS clients
+            String channel = "market:" + event.getSymbol() + ":orderbook";
+            redisTemplate.convertAndSend(channel,
+                    objectMapper.writeValueAsString(message));
+        } catch (Exception e) {
+            // Fallback: direct push if Redis fails
+            messagingTemplate.convertAndSend(
+                    "/topic/" + event.getSymbol() + "/orderbook", message);
+            log.warn("Redis publish failed, direct WS fallback: {}", e.getMessage());
+        }
     }
 
     // ── Called by TradeEventConsumer after a trade executes ────
@@ -62,11 +69,15 @@ public class MarketDataPublisher {
                 .build();
 
         // Broadcast to all subscribers of this symbol's trade feed
-        String destination = "/topic/" + event.getSymbol() + "/trades";
-        messagingTemplate.convertAndSend(destination, message);
-
-        log.debug("Trade published to WebSocket: {} @ {}",
-                event.getSymbol(), event.getPrice());
+       try {
+            String channel = "market:" + event.getSymbol() + ":trades";
+            redisTemplate.convertAndSend(channel,
+                    objectMapper.writeValueAsString(message));
+        } catch (Exception e) {
+            messagingTemplate.convertAndSend(
+                    "/topic/" + event.getSymbol() + "/trades", message);
+            log.warn("Redis publish failed, direct WS fallback: {}", e.getMessage());
+        }
     }
 
     // ── Called for private order fill notifications ─────────────
@@ -79,5 +90,27 @@ public class MarketDataPublisher {
 
         log.debug("Order update sent to user {}: order={} status={}",
                 userId, message.getOrderId(), message.getStatus());
+    }
+
+    private OrderBookMessage buildOrderBookMessage(OrderBookUpdateEvent event) {
+        return OrderBookMessage.builder()
+                .symbol(event.getSymbol())
+                .bids(event.getBids().stream()
+                        .map(l -> OrderBookMessage.PriceLevel.builder()
+                                .price(l.getPrice())
+                                .quantity(l.getTotalQuantity())
+                                .orderCount(l.getOrderCount())
+                                .build())
+                        .collect(java.util.stream.Collectors.toList()))
+                .asks(event.getAsks().stream()
+                        .map(l -> OrderBookMessage.PriceLevel.builder()
+                                .price(l.getPrice())
+                                .quantity(l.getTotalQuantity())
+                                .orderCount(l.getOrderCount())
+                                .build())
+                        .collect(java.util.stream.Collectors.toList()))
+                .timestamp(event.getTimestamp())
+                .sequence(event.getSequenceNumber())
+                .build();
     }
 }

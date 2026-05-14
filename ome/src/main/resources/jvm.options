@@ -1,0 +1,9 @@
+ENTRYPOINT ["java", \
+  "-XX:+UseZGC", \
+  "-XX:MaxGCPauseMillis=1", \
+  "-Xms512m", \
+  "-Xmx2g", \
+  "-XX:+AlwaysPreTouch", \
+  "-XX:+DisableExplicitGC", \
+  "-Djava.net.preferIPv4Stack=true", \
+  "-jar", "app.jar"]

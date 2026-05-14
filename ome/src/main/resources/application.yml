@@ -55,6 +55,7 @@ spring:
       retries: 3
       properties:
         enable.idempotence: true
+        partitioner.class: org.apache.kafka.clients.producer.internals.DefaultPartitioner
     consumer:
       group-id: ome-consumer-group
       auto-offset-reset: earliest
@@ -107,6 +108,19 @@ app:
       order-events: order.events
       trade-executed: trade.executed
       order-book-update: orderbook.update
+  consistency:
+    # Balance cache TTL - shorter = more consistent, higher DB load
+    balance-cache-ttl-seconds: 30
+
+    # Instrument cache TTL - instruments rarely change
+    instrument-cache-ttl-minutes: 60
+
+    # Order book snapshot depth for WebSocket
+    orderbook-depth: 10
+
+    # Kafka producer acks - "all" = strongest durability guarantee
+    # "1" = faster but risks message loss on broker failure
+    kafka-acks: all
 
 # ── Logging ───────────────────────────────────────────────
 logging:

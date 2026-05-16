@@ -7,6 +7,7 @@ import com.project.ome.marketdata.MarketDataPublisher;
 import com.project.ome.marketdata.dto.OrderUpdateMessage;
 import com.project.ome.shared.cache.AccountCacheService;
 import com.project.ome.shared.entity.*;
+import com.project.ome.shared.observability.MetricsService;
 import com.project.ome.shared.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,7 @@ public class TradeEventConsumer {
     private final AccountRepository    accountRepository;
     private final MarketDataPublisher marketDataPublisher;
     private final AccountCacheService accountCacheService;
+    private final MetricsService metricsService;
 
     @KafkaListener(
     topics   = "${app.kafka.topics.trade-executed}",
@@ -68,6 +70,11 @@ public void consume(TradeEvent event) {
 
     // 6. Settle balances
     settleBalances(event, instrument);
+    metricsService.recordTradeExecuted(
+            event.getQuantity().doubleValue(),
+            event.getPrice().doubleValue());
+    metricsService.recordOrderFilled();
+    metricsService.recordOrderFilled();
 
     // 7. Publish WebSocket trade + order fill notifications  ← INSIDE consume()
     marketDataPublisher.publishTrade(event);

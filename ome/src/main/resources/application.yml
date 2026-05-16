@@ -72,6 +72,11 @@ spring:
     user:
       name: admin
       password: ${SPRING_SECURITY_PASSWORD:admin}
+  zipkin:
+    base-url: http://localhost:9411
+  sleuth:
+    zipkin:
+      enabled: true
 
 # ── Server ────────────────────────────────────────────────
 server:
@@ -80,18 +85,6 @@ server:
     context-path: /
 
 # ── Actuator ──────────────────────────────────────────────
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus,metrics
-  endpoint:
-    health:
-      show-details: always
-  metrics:
-    export:
-      prometheus:
-        enabled: true
 
 # ── App custom config ──────────────────────────────────────
 app:
@@ -129,7 +122,7 @@ logging:
     org.springframework.security: INFO
     org.hibernate.SQL: INFO
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{requestId}] %logger{36} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{traceId},%X{spanId}] [%X{requestId}] %logger{36} - %msg%n"
 
 resilience4j:
   circuitbreaker:
@@ -164,3 +157,26 @@ resilience4j:
     instances:
       orderService:
         timeoutDuration: 3s
+
+  # ── Tracing ───────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,circuitbreakers,loggers
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: order-matching-engine
+      environment: local
+  tracing:
+    sampling:
+      probability: 1.0    # trace 100% of requests (reduce to 0.1 in production)
+
+# ── Zipkin ────────────────────────────────────────────────
+# ── Logging with TraceId ──────────────────────────────────

@@ -112,6 +112,22 @@
 			<version>${resilience4j.version}</version>
 		</dependency>
 
+			<!-- Tracing -->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing-bridge-brave</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.zipkin.reporter2</groupId>
+			<artifactId>zipkin-reporter-brave</artifactId>
+		</dependency>
+
+		<!-- AOP for method-level metrics -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aop</artifactId>
+		</dependency>
+
 		<!-- ── Observability ────────────────────────────────── -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>

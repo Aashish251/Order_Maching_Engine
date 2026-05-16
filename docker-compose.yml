@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
 
@@ -89,6 +88,32 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
     depends_on:
       - kafka
+  
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: ome_zipkin
+    ports:
+      - "9411:9411"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ome_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - zipkin          
+      
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ome_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on:
+      - prometheus      
 
 volumes:
   postgres_data:

@@ -4,162 +4,188 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>OME — Order Matching Engine</title>
+  <meta name="description" content="Real-time Order Matching Engine dashboard with live order book, trade feed, and fill notifications."/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
   <style>
     :root {
-      --bg:    #0a0e17; --bg2: #0f1623; --card: #131c2e; --hover: #1a2540;
-      --bdr:   #1e2d47; --txt: #e2e8f0; --txt2: #8a9bb8; --muted: #4a5878;
-      --green: #00d4aa; --red: #ff4d6a; --blue: #4d9fff;
-      --yellow:#ffd166; --purple:#b794f4; --mono:'Courier New',monospace;
+      --bg: #07080f; --bg2: #0d1017; --card: #111827;
+      --hover: #1a2235; --bdr: #1e293b; --txt: #e2e8f0;
+      --txt2: #94a3b8; --muted: #475569;
+      --green: #10b981; --green-glow: rgba(16,185,129,.25);
+      --red: #ef4444; --red-glow: rgba(239,68,68,.25);
+      --blue: #3b82f6; --yellow: #f59e0b; --purple: #a78bfa;
+      --cyan: #06b6d4;
+      --mono: 'JetBrains Mono', 'Courier New', monospace;
+      --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius: 8px;
     }
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{background:var(--bg);color:var(--txt);
-         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px}
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    body { background:var(--bg); color:var(--txt); font-family:var(--sans); font-size:13px; overflow:hidden; height:100vh; display:flex; flex-direction:column; }
 
-    .topbar{display:flex;align-items:center;justify-content:space-between;
-            padding:0 24px;height:52px;background:var(--bg2);border-bottom:1px solid var(--bdr)}
-    .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px}
-    .logo-i{width:28px;height:28px;background:linear-gradient(135deg,#4d9fff,#00d4aa);
-            border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:15px}
-    .sym{background:var(--card);border:1px solid var(--bdr);border-radius:6px;
-         padding:3px 12px;font-weight:700;font-size:13px;color:var(--yellow);font-family:var(--mono)}
-    .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:all .3s}
-    .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
-    .sl{font-size:12px;color:var(--muted);transition:color .3s}
-    .sl.on{color:var(--green)}
+    /* ── TOPBAR ── */
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:0 24px; height:54px; background:var(--bg2); border-bottom:1px solid var(--bdr); flex-shrink:0; }
+    .logo { display:flex; align-items:center; gap:12px; font-weight:700; font-size:15px; }
+    .logo-icon { width:32px; height:32px; background:linear-gradient(135deg,var(--blue),var(--cyan)); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; font-size:16px; box-shadow:0 0 20px rgba(59,130,246,.3); }
+    .version { color:var(--muted); font-weight:400; font-size:11px; margin-left:4px; }
+    .sym-badge { background:var(--card); border:1px solid var(--bdr); border-radius:6px; padding:4px 14px; font-weight:700; font-size:13px; color:var(--yellow); font-family:var(--mono); }
+    .status-group { display:flex; align-items:center; gap:8px; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); transition:all .4s ease; }
+    .dot.on { background:var(--green); box-shadow:0 0 10px var(--green-glow); }
+    .status-label { font-size:12px; color:var(--muted); transition:color .4s; }
+    .status-label.on { color:var(--green); }
 
-    .conn{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-          padding:10px 24px;background:var(--bg2);border-bottom:1px solid var(--bdr)}
-    .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);white-space:nowrap}
-    input{background:var(--card);border:1px solid var(--bdr);border-radius:6px;
-          color:var(--txt);padding:6px 12px;font-size:12px;outline:none}
-    input:focus{border-color:var(--blue)}
-    .btn{padding:6px 18px;border-radius:6px;border:none;font-size:12px;font-weight:600;cursor:pointer}
-    .btn-p{background:linear-gradient(135deg,#1d6fe8,#4d9fff);color:#fff}
-    .btn-d{background:var(--card);color:var(--red);border:1px solid rgba(255,77,106,.3)}
+    /* ── CONNECTION BAR ── */
+    .conn-bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 24px; background:var(--bg2); border-bottom:1px solid var(--bdr); flex-shrink:0; }
+    .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); white-space:nowrap; font-weight:600; }
+    input[type="text"] { background:var(--card); border:1px solid var(--bdr); border-radius:6px; color:var(--txt); padding:7px 14px; font-size:12px; font-family:var(--mono); outline:none; transition:border-color .2s, box-shadow .2s; }
+    input[type="text"]:focus { border-color:var(--blue); box-shadow:0 0 0 3px rgba(59,130,246,.15); }
+    .btn { padding:7px 20px; border-radius:6px; border:none; font-size:12px; font-weight:600; cursor:pointer; transition:all .2s; font-family:var(--sans); }
+    .btn:active { transform:scale(.97); }
+    .btn-connect { background:linear-gradient(135deg,#1d6fe8,#3b82f6); color:#fff; box-shadow:0 2px 10px rgba(59,130,246,.3); }
+    .btn-connect:hover { box-shadow:0 4px 16px rgba(59,130,246,.45); }
+    .btn-disconnect { background:var(--card); color:var(--red); border:1px solid rgba(239,68,68,.25); }
+    .btn-disconnect:hover { background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.5); }
 
-    .stats{display:flex;background:var(--bg2);border-bottom:1px solid var(--bdr)}
-    .si{padding:8px 20px;border-right:1px solid var(--bdr);min-width:110px}
-    .sl2{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:2px}
-    .sv{font-family:var(--mono);font-size:15px;font-weight:700}
+    /* ── STATS BAR ── */
+    .stats-bar { display:flex; background:var(--bg2); border-bottom:1px solid var(--bdr); flex-shrink:0; overflow-x:auto; }
+    .stat-item { padding:8px 20px; border-right:1px solid var(--bdr); min-width:110px; }
+    .stat-label { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin-bottom:2px; font-weight:600; }
+    .stat-value { font-family:var(--mono); font-size:15px; font-weight:700; }
 
-    .grid{display:grid;grid-template-columns:260px 1fr 260px;grid-template-rows:1fr 160px;
-          gap:1px;background:var(--bdr);height:calc(100vh - 52px - 46px - 44px)}
-    .panel{background:var(--card);display:flex;flex-direction:column;overflow:hidden}
-    .fc{grid-column:1/-1}
-    .ph{display:flex;align-items:center;justify-content:space-between;
-        padding:9px 14px;border-bottom:1px solid var(--bdr);background:var(--bg2)}
-    .pt{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--txt2);font-weight:600}
-    .pb{font-size:10px;padding:2px 8px;border-radius:10px;
-        background:rgba(77,159,255,.15);color:var(--blue);font-weight:600}
-    .pb.pv{background:rgba(183,148,244,.15);color:var(--purple)}
-    .pb.sy{background:rgba(255,209,102,.1);color:var(--yellow)}
-    .pbody{flex:1;overflow-y:auto}
-    .pbody::-webkit-scrollbar{width:3px}
-    .pbody::-webkit-scrollbar-thumb{background:var(--bdr)}
+    /* ── MAIN GRID ── */
+    .grid { display:grid; grid-template-columns:280px 1fr 280px; grid-template-rows:1fr 180px; gap:1px; background:var(--bdr); flex:1; min-height:0; }
+    .panel { background:var(--card); display:flex; flex-direction:column; overflow:hidden; }
+    .panel-full { grid-column:1/-1; }
+    .panel-header { display:flex; align-items:center; justify-content:space-between; padding:10px 16px; border-bottom:1px solid var(--bdr); background:var(--bg2); flex-shrink:0; }
+    .panel-title { font-size:10px; text-transform:uppercase; letter-spacing:1.2px; color:var(--txt2); font-weight:700; }
+    .badge { font-size:9px; padding:2px 10px; border-radius:10px; font-weight:700; letter-spacing:.5px; }
+    .badge-live { background:rgba(16,185,129,.12); color:var(--green); }
+    .badge-private { background:rgba(167,139,250,.12); color:var(--purple); }
+    .badge-system { background:rgba(245,158,11,.1); color:var(--yellow); }
+    .panel-body { flex:1; overflow-y:auto; min-height:0; }
+    .panel-body::-webkit-scrollbar { width:4px; }
+    .panel-body::-webkit-scrollbar-track { background:transparent; }
+    .panel-body::-webkit-scrollbar-thumb { background:var(--bdr); border-radius:2px; }
 
-    table{width:100%;border-collapse:collapse}
-    th{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);
-       padding:7px 14px;text-align:right;border-bottom:1px solid var(--bdr);
-       position:sticky;top:0;background:var(--card)}
-    th:first-child{text-align:left}
+    /* ── TABLES ── */
+    table { width:100%; border-collapse:collapse; }
+    th { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); padding:8px 16px; text-align:right; border-bottom:1px solid var(--bdr); position:sticky; top:0; background:var(--card); z-index:2; font-weight:700; }
+    th:first-child { text-align:left; }
 
-    .or{position:relative;transition:background .1s}
-    .or:hover{background:var(--hover)}
-    .or td{padding:4px 14px;font-family:var(--mono);font-size:12px;
-           text-align:right;position:relative;z-index:1}
-    .or td:first-child{text-align:left}
-    .bar{position:absolute;right:0;top:0;bottom:0;opacity:.1;pointer-events:none}
-    .ap{color:var(--red);font-weight:600}
-    .bp{color:var(--green);font-weight:600}
-    .spr td{text-align:center!important;font-size:10px;color:var(--muted);
-            padding:3px;background:var(--bg2);letter-spacing:.5px}
+    /* ORDER BOOK ROWS */
+    .ob-row { position:relative; transition:background .15s; }
+    .ob-row:hover { background:var(--hover); }
+    .ob-row td { padding:4px 16px; font-family:var(--mono); font-size:12px; text-align:right; position:relative; z-index:1; }
+    .ob-row td:first-child { text-align:left; }
+    .ob-row .depth-bar { position:absolute; right:0; top:0; bottom:0; opacity:.08; pointer-events:none; z-index:0; }
+    .ask-price { color:var(--red); font-weight:600; }
+    .bid-price { color:var(--green); font-weight:600; }
+    .spread-row td { text-align:center!important; font-size:10px; color:var(--muted); padding:4px; background:var(--bg2); letter-spacing:.5px; font-family:var(--mono); }
 
-    .tr td{padding:5px 14px;font-family:var(--mono);font-size:12px;
-           text-align:right;border-bottom:1px solid rgba(30,45,71,.4);
-           animation:fi .25s forwards}
-    .tr td:first-child{text-align:left}
-    .tr.b .tp{color:var(--green)}
-    .tr.s .tp{color:var(--red)}
-    .tt{color:var(--muted);font-size:11px}
+    /* TRADE ROWS */
+    .trade-row td { padding:5px 16px; font-family:var(--mono); font-size:12px; text-align:right; border-bottom:1px solid rgba(30,45,71,.3); animation:fadeSlideIn .3s ease forwards; }
+    .trade-row td:first-child { text-align:left; }
+    .trade-row.buy .trade-price { color:var(--green); }
+    .trade-row.sell .trade-price { color:var(--red); }
+    .trade-time { color:var(--muted); font-size:11px; }
 
-    .fr td{padding:5px 14px;font-family:var(--mono);font-size:12px;
-           border-bottom:1px solid rgba(30,45,71,.4);animation:fi .25s forwards}
-    .ff{color:var(--green)} .fp{color:var(--yellow)} .fo{color:var(--blue)}
+    /* FILL ROWS */
+    .fill-row td { padding:5px 16px; font-family:var(--mono); font-size:12px; border-bottom:1px solid rgba(30,45,71,.3); animation:fadeSlideIn .3s ease forwards; }
+    .status-filled { color:var(--green); font-weight:700; }
+    .status-partial { color:var(--yellow); font-weight:700; }
+    .status-other { color:var(--blue); font-weight:700; }
 
-    @keyframes fi{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}
+    @keyframes fadeSlideIn { from { opacity:0; transform:translateX(-6px); } to { opacity:1; transform:none; } }
 
-    .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
-           height:90px;color:var(--muted);gap:5px}
-    .empty span:first-child{font-size:22px;opacity:.3}
-    .empty span:last-child{font-size:11px}
+    .empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100px; color:var(--muted); gap:6px; }
+    .empty-state .icon { font-size:24px; opacity:.3; }
+    .empty-state .text { font-size:11px; }
+
+    /* LOG */
+    .log-area { padding:10px 18px; font-family:var(--mono); font-size:11px; color:var(--muted); }
+    .log-area div { padding:1px 0; }
+
+    /* RESPONSIVE */
+    @media (max-width:900px) {
+      .grid { grid-template-columns:1fr; grid-template-rows:auto; }
+      .panel-full { grid-column:1; }
+    }
   </style>
 </head>
 <body>
 
+<!-- TOPBAR -->
 <div class="topbar">
   <div class="logo">
-    <div class="logo-i">⚡</div>
+    <div class="logo-icon">⚡</div>
     <span>Order Matching Engine</span>
-    <span style="color:var(--muted);font-weight:400;font-size:11px;margin-left:4px">v1.0.0</span>
+    <span class="version">v1.0.0</span>
   </div>
-  <div style="display:flex;align-items:center;gap:14px">
-    <span class="sym" id="symB">BTC-USD</span>
-    <div style="display:flex;align-items:center;gap:6px">
+  <div style="display:flex;align-items:center;gap:16px">
+    <span class="sym-badge" id="symBadge">BTC-USD</span>
+    <div class="status-group">
       <div class="dot" id="dot"></div>
-      <span class="sl" id="sl">Disconnected</span>
+      <span class="status-label" id="statusLabel">Disconnected</span>
     </div>
   </div>
 </div>
 
-<div class="conn">
+<!-- CONNECTION BAR -->
+<div class="conn-bar">
   <span class="lbl">JWT Token</span>
-  <input id="tok" placeholder="Paste Bearer token from /api/v1/auth/login" style="width:360px"/>
+  <input type="text" id="tok" placeholder="Paste Bearer token from /api/v1/auth/login" style="width:360px"/>
   <span class="lbl">Symbol</span>
-  <input id="sym" value="BTC-USD" style="width:90px"/>
-  <button class="btn btn-p" onclick="go()">⚡ Connect</button>
-  <button class="btn btn-d" onclick="bye()">Disconnect</button>
+  <input type="text" id="sym" value="BTC-USD" style="width:100px"/>
+  <button class="btn btn-connect" onclick="connect()">⚡ Connect</button>
+  <button class="btn btn-disconnect" onclick="disconnect()">Disconnect</button>
 </div>
 
-<div class="stats">
-  <div class="si"><div class="sl2">Last Price</div><div class="sv" id="lp" style="color:var(--yellow)">—</div></div>
-  <div class="si"><div class="sl2">Best Bid</div><div class="sv" id="bb" style="color:var(--green)">—</div></div>
-  <div class="si"><div class="sl2">Best Ask</div><div class="sv" id="ba" style="color:var(--red)">—</div></div>
-  <div class="si"><div class="sl2">Spread</div><div class="sv" id="sp" style="color:var(--blue)">—</div></div>
-  <div class="si"><div class="sl2">Trades</div><div class="sv" id="tc" style="color:var(--purple)">0</div></div>
-  <div class="si"><div class="sl2">Seq #</div><div class="sv" id="sq" style="color:var(--muted);font-size:12px">—</div></div>
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat-item"><div class="stat-label">Last Price</div><div class="stat-value" id="lastPrice" style="color:var(--yellow)">—</div></div>
+  <div class="stat-item"><div class="stat-label">Best Bid</div><div class="stat-value" id="bestBid" style="color:var(--green)">—</div></div>
+  <div class="stat-item"><div class="stat-label">Best Ask</div><div class="stat-value" id="bestAsk" style="color:var(--red)">—</div></div>
+  <div class="stat-item"><div class="stat-label">Spread</div><div class="stat-value" id="spread" style="color:var(--blue)">—</div></div>
+  <div class="stat-item"><div class="stat-label">Trades</div><div class="stat-value" id="tradeCount" style="color:var(--purple)">0</div></div>
+  <div class="stat-item"><div class="stat-label">Seq #</div><div class="stat-value" id="sequence" style="color:var(--muted);font-size:12px">—</div></div>
 </div>
 
+<!-- MAIN GRID -->
 <div class="grid">
 
+  <!-- ORDER BOOK -->
   <div class="panel">
-    <div class="ph"><span class="pt">Order Book</span><span class="pb">LIVE</span></div>
-    <div class="pbody">
+    <div class="panel-header"><span class="panel-title">Order Book</span><span class="badge badge-live">LIVE</span></div>
+    <div class="panel-body">
       <table><thead><tr><th>Side</th><th>Price</th><th>Size</th><th>N</th></tr></thead>
-      <tbody id="ob"><tr><td colspan="4"><div class="empty"><span>📊</span><span>Awaiting data…</span></div></td></tr></tbody></table>
+      <tbody id="orderBookBody"><tr><td colspan="4"><div class="empty-state"><span class="icon">📊</span><span class="text">Awaiting data…</span></div></td></tr></tbody></table>
     </div>
   </div>
 
+  <!-- TRADE FEED -->
   <div class="panel">
-    <div class="ph"><span class="pt">Trade Feed</span><span class="pb">LIVE</span></div>
-    <div class="pbody">
+    <div class="panel-header"><span class="panel-title">Trade Feed</span><span class="badge badge-live">LIVE</span></div>
+    <div class="panel-body">
       <table><thead><tr><th>Symbol</th><th>Price</th><th>Qty</th><th>Side</th><th>Time</th></tr></thead>
-      <tbody id="tf"><tr><td colspan="5"><div class="empty"><span>🔄</span><span>No trades yet…</span></div></td></tr></tbody></table>
+      <tbody id="tradeFeedBody"><tr><td colspan="5"><div class="empty-state"><span class="icon">🔄</span><span class="text">No trades yet…</span></div></td></tr></tbody></table>
     </div>
   </div>
 
+  <!-- MY FILLS -->
   <div class="panel">
-    <div class="ph"><span class="pt">My Fills</span><span class="pb pv">PRIVATE</span></div>
-    <div class="pbody">
+    <div class="panel-header"><span class="panel-title">My Fills</span><span class="badge badge-private">PRIVATE</span></div>
+    <div class="panel-body">
       <table><thead><tr><th>Order</th><th>Status</th><th>Filled</th><th>Price</th></tr></thead>
-      <tbody id="fi"><tr><td colspan="4"><div class="empty"><span>🔔</span><span>No fills yet…</span></div></td></tr></tbody></table>
+      <tbody id="fillsBody"><tr><td colspan="4"><div class="empty-state"><span class="icon">🔔</span><span class="text">No fills yet…</span></div></td></tr></tbody></table>
     </div>
   </div>
 
-  <div class="panel fc">
-    <div class="ph"><span class="pt">Activity Log</span><span class="pb sy">SYSTEM</span></div>
-    <div class="pbody" id="log" style="padding:8px 16px;font-family:var(--mono);font-size:11px;color:var(--muted)">
+  <!-- ACTIVITY LOG -->
+  <div class="panel panel-full">
+    <div class="panel-header"><span class="panel-title">Activity Log</span><span class="badge badge-system">SYSTEM</span></div>
+    <div class="panel-body log-area" id="logArea">
       <div>System ready. Enter JWT token and click Connect.</div>
     </div>
   </div>
@@ -167,100 +193,214 @@
 </div>
 
 <script>
-  let cl=null, tc=0;
-  const $=id=>document.getElementById(id);
-  const f=(n,d=2)=>parseFloat(n).toFixed(d);
+  // ── State ──
+  let stompClient = null;
+  let tradeCounter = 0;
+  let reconnectTimer = null;
 
-  function addLog(msg,col){
-    const d=document.createElement('div');
-    d.style.color=col||'var(--muted)';
-    d.textContent=new Date().toLocaleTimeString()+' '+msg;
-    $('log').prepend(d);
-    while($('log').children.length>60)$('log').lastChild.remove();
-  }
+  // ── Helpers ──
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n, d = 2) => parseFloat(n).toFixed(d);
 
-  function go(){
-    const tok=$('tok').value.trim(), sym=$('sym').value.trim();
-    $('symB').textContent=sym;
-    addLog('Connecting to '+sym+'…');
-    const s=new SockJS('http://localhost:8080/ws');
-    cl=Stomp.over(s); cl.debug=()=>{};
-    cl.connect(tok?{Authorization:'Bearer '+tok}:{},()=>{
-      $('dot').classList.add('on');$('sl').classList.add('on');$('sl').textContent='Connected';
-      addLog('✓ Connected to '+sym,'var(--green)');
-      cl.subscribe('/topic/'+sym+'/orderbook',m=>renderOB(JSON.parse(m.body)));
-      cl.subscribe('/topic/'+sym+'/trades',m=>renderTrade(JSON.parse(m.body)));
-      if(tok)cl.subscribe('/user/queue/orders',m=>renderFill(JSON.parse(m.body)));
-      addLog('Subscribed to orderbook + trades'+(tok?' + private fills':''),'var(--blue)');
-    },e=>{addLog('✗ Failed: '+e,'var(--red)');});
-  }
-
-  function bye(){
-    if(cl)cl.disconnect();
-    $('dot').classList.remove('on');$('sl').classList.remove('on');
-    $('sl').textContent='Disconnected'; addLog('Disconnected.');
-  }
-
-  function renderOB(data){
-    $('sq').textContent=data.sequence;
-    const bids=data.bids||[],asks=data.asks||[];
-    if(bids.length)$('bb').textContent=f(bids[0].price);
-    if(asks.length)$('ba').textContent=f(asks[0].price);
-    if(bids.length&&asks.length)$('sp').textContent=f(parseFloat(asks[0].price)-parseFloat(bids[0].price));
-    const allQ=[...bids,...asks].map(l=>parseFloat(l.quantity));
-    const maxQ=Math.max(...allQ,0.0001);
-    const tb=$('ob'); tb.innerHTML='';
-    asks.slice(0,10).reverse().forEach(l=>{
-      const pct=(parseFloat(l.quantity)/maxQ*80).toFixed(0);
-      const tr=document.createElement('tr'); tr.className='or';
-      tr.innerHTML=`<td class="ap">ASK</td><td class="ap">${f(l.price)}</td>
-        <td style="color:var(--txt)">${f(l.quantity,5)}</td>
-        <td style="color:var(--muted)">${l.orderCount}</td>
-        <div class="bar" style="width:${pct}%;background:var(--red)"></div>`;
-      tb.appendChild(tr);
-    });
-    if(bids.length&&asks.length){
-      const sp=f(parseFloat(asks[0].price)-parseFloat(bids[0].price));
-      const tr=document.createElement('tr'); tr.className='spr';
-      tr.innerHTML=`<td colspan="4">── spread ${sp} ──</td>`; tb.appendChild(tr);
+  /** Parse Java Instant — handles epoch-seconds (number) and ISO string */
+  function parseInstant(val) {
+    if (val == null) return new Date();
+    if (typeof val === 'number') {
+      // Java Instant default: epoch-seconds (may have decimals for nanos)
+      return val > 1e12 ? new Date(val) : new Date(val * 1000);
     }
-    bids.slice(0,10).forEach(l=>{
-      const pct=(parseFloat(l.quantity)/maxQ*80).toFixed(0);
-      const tr=document.createElement('tr'); tr.className='or';
-      tr.innerHTML=`<td class="bp">BID</td><td class="bp">${f(l.price)}</td>
-        <td style="color:var(--txt)">${f(l.quantity,5)}</td>
-        <td style="color:var(--muted)">${l.orderCount}</td>
-        <div class="bar" style="width:${pct}%;background:var(--green)"></div>`;
-      tb.appendChild(tr);
+    return new Date(val); // ISO-8601 string
+  }
+
+  function addLog(msg, color) {
+    const div = document.createElement('div');
+    div.style.color = color || 'var(--muted)';
+    div.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+    const log = $('logArea');
+    log.prepend(div);
+    while (log.children.length > 80) log.lastChild.remove();
+  }
+
+  // ── Connection ──
+  function connect() {
+    if (stompClient) { addLog('Already connected. Disconnect first.', 'var(--yellow)'); return; }
+    const token = $('tok').value.trim();
+    const symbol = $('sym').value.trim().toUpperCase();
+    if (!symbol) { addLog('Symbol is required.', 'var(--red)'); return; }
+
+    $('symBadge').textContent = symbol;
+    addLog('Connecting to ' + symbol + '…');
+
+    // Pass JWT as query param so the HTTP handshake filter can authenticate the user
+    const wsUrl = token
+      ? 'http://localhost:8080/ws?token=' + encodeURIComponent(token)
+      : 'http://localhost:8080/ws';
+
+    const socket = new SockJS(wsUrl);
+    stompClient = Stomp.over(socket);
+    stompClient.debug = () => {};  // silence STOMP debug logs
+
+    const headers = token ? { Authorization: 'Bearer ' + token } : {};
+
+    stompClient.connect(headers, function onConnected() {
+      clearTimeout(reconnectTimer);
+      $('dot').classList.add('on');
+      $('statusLabel').classList.add('on');
+      $('statusLabel').textContent = 'Connected';
+      addLog('✓ Connected to ' + symbol, 'var(--green)');
+
+      // Public: order book snapshot
+      stompClient.subscribe('/topic/' + symbol + '/orderbook', function(msg) {
+        try { renderOrderBook(JSON.parse(msg.body)); }
+        catch (e) { addLog('⚠ Order book parse error: ' + e.message, 'var(--yellow)'); }
+      });
+
+      // Public: trade feed
+      stompClient.subscribe('/topic/' + symbol + '/trades', function(msg) {
+        try { renderTrade(JSON.parse(msg.body)); }
+        catch (e) { addLog('⚠ Trade parse error: ' + e.message, 'var(--yellow)'); }
+      });
+
+      // Private: user fills (only if authenticated)
+      if (token) {
+        stompClient.subscribe('/user/queue/orders', function(msg) {
+          try { renderFill(JSON.parse(msg.body)); }
+          catch (e) { addLog('⚠ Fill parse error: ' + e.message, 'var(--yellow)'); }
+        });
+      }
+
+      addLog('Subscribed: orderbook + trades' + (token ? ' + private fills' : ''), 'var(--blue)');
+
+    }, function onError(err) {
+      addLog('✗ Connection failed: ' + (err.headers ? err.headers.message : err), 'var(--red)');
+      setDisconnectedUI();
+      // Auto-reconnect after 5s
+      reconnectTimer = setTimeout(function() {
+        addLog('Attempting reconnect…', 'var(--yellow)');
+        stompClient = null;
+        connect();
+      }, 5000);
     });
   }
 
-  function renderTrade(data){
-    tc++; $('tc').textContent=tc; $('lp').textContent=f(data.price);
-    const tb=$('tf'); if(tb.querySelector('.empty'))tb.innerHTML='';
-    const buy=data.side==='BUY';
-    const tr=document.createElement('tr'); tr.className='tr '+(buy?'b':'s');
-    tr.innerHTML=`<td style="color:var(--txt2)">${data.symbol}</td>
-      <td class="tp">${f(data.price)}</td>
-      <td style="color:var(--txt)">${f(data.quantity,5)}</td>
-      <td style="color:${buy?'var(--green)':'var(--red)'};font-weight:700">${data.side}</td>
-      <td class="tt">${new Date(data.executedAt).toLocaleTimeString()}</td>`;
-    tb.insertBefore(tr,tb.firstChild);
-    while(tb.rows.length>25)tb.deleteRow(tb.rows.length-1);
-    addLog('Trade '+data.symbol+' '+data.side+' '+f(data.quantity,5)+' @ '+f(data.price),buy?'var(--green)':'var(--red)');
+  function disconnect() {
+    clearTimeout(reconnectTimer);
+    if (stompClient) {
+      try { stompClient.disconnect(); } catch (e) { /* already closed */ }
+      stompClient = null;
+    }
+    setDisconnectedUI();
+    addLog('Disconnected.');
   }
 
-  function renderFill(data){
-    const tb=$('fi'); if(tb.querySelector('.empty'))tb.innerHTML='';
-    const short=data.orderId.substring(0,8)+'…';
-    const cls=data.status==='FILLED'?'ff':data.status==='PARTIALLY_FILLED'?'fp':'fo';
-    const tr=document.createElement('tr'); tr.className='fr';
-    tr.innerHTML=`<td style="color:var(--txt2)" title="${data.orderId}">${short}</td>
-      <td class="${cls}" style="font-weight:700">${data.status}</td>
-      <td style="color:var(--txt)">${f(data.filledQty,5)}</td>
-      <td style="color:var(--yellow)">${f(data.lastFillPrice)}</td>`;
-    tb.insertBefore(tr,tb.firstChild);
-    addLog('Fill: order '+short+' → '+data.status+' @ '+f(data.lastFillPrice),'var(--purple)');
+  function setDisconnectedUI() {
+    $('dot').classList.remove('on');
+    $('statusLabel').classList.remove('on');
+    $('statusLabel').textContent = 'Disconnected';
+  }
+
+  // ── Renderers ──
+  function renderOrderBook(data) {
+    $('sequence').textContent = data.sequence;
+    const bids = data.bids || [], asks = data.asks || [];
+
+    if (bids.length) $('bestBid').textContent = fmt(bids[0].price);
+    if (asks.length) $('bestAsk').textContent = fmt(asks[0].price);
+    if (bids.length && asks.length) {
+      $('spread').textContent = fmt(parseFloat(asks[0].price) - parseFloat(bids[0].price));
+    }
+
+    const allQty = [...bids, ...asks].map(l => parseFloat(l.quantity));
+    const maxQty = Math.max(...allQty, 0.0001);
+    const tbody = $('orderBookBody');
+    tbody.innerHTML = '';
+
+    // Asks (reversed so lowest ask is near spread)
+    asks.slice(0, 12).reverse().forEach(function(level) {
+      const pct = (parseFloat(level.quantity) / maxQty * 80).toFixed(0);
+      const tr = document.createElement('tr');
+      tr.className = 'ob-row';
+      tr.innerHTML =
+        '<td class="ask-price">ASK</td>' +
+        '<td class="ask-price">' + fmt(level.price) + '</td>' +
+        '<td style="color:var(--txt)">' + fmt(level.quantity, 5) + '</td>' +
+        '<td style="color:var(--muted)">' + level.orderCount + '</td>' +
+        '<td class="depth-bar" style="width:' + pct + '%;background:var(--red)"></td>';
+      tbody.appendChild(tr);
+    });
+
+    // Spread row
+    if (bids.length && asks.length) {
+      const spreadVal = fmt(parseFloat(asks[0].price) - parseFloat(bids[0].price));
+      const tr = document.createElement('tr');
+      tr.className = 'spread-row';
+      tr.innerHTML = '<td colspan="4">── spread ' + spreadVal + ' ──</td>';
+      tbody.appendChild(tr);
+    }
+
+    // Bids
+    bids.slice(0, 12).forEach(function(level) {
+      const pct = (parseFloat(level.quantity) / maxQty * 80).toFixed(0);
+      const tr = document.createElement('tr');
+      tr.className = 'ob-row';
+      tr.innerHTML =
+        '<td class="bid-price">BID</td>' +
+        '<td class="bid-price">' + fmt(level.price) + '</td>' +
+        '<td style="color:var(--txt)">' + fmt(level.quantity, 5) + '</td>' +
+        '<td style="color:var(--muted)">' + level.orderCount + '</td>' +
+        '<td class="depth-bar" style="width:' + pct + '%;background:var(--green)"></td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderTrade(data) {
+    tradeCounter++;
+    $('tradeCount').textContent = tradeCounter;
+    $('lastPrice').textContent = fmt(data.price);
+
+    const tbody = $('tradeFeedBody');
+    if (tbody.querySelector('.empty-state')) tbody.innerHTML = '';
+
+    const isBuy = data.side === 'BUY';
+    const tr = document.createElement('tr');
+    tr.className = 'trade-row ' + (isBuy ? 'buy' : 'sell');
+
+    const time = parseInstant(data.executedAt);
+
+    tr.innerHTML =
+      '<td style="color:var(--txt2)">' + data.symbol + '</td>' +
+      '<td class="trade-price">' + fmt(data.price) + '</td>' +
+      '<td style="color:var(--txt)">' + fmt(data.quantity, 5) + '</td>' +
+      '<td style="color:' + (isBuy ? 'var(--green)' : 'var(--red)') + ';font-weight:700">' + data.side + '</td>' +
+      '<td class="trade-time">' + time.toLocaleTimeString() + '</td>';
+
+    tbody.insertBefore(tr, tbody.firstChild);
+    while (tbody.rows.length > 30) tbody.deleteRow(tbody.rows.length - 1);
+
+    addLog('Trade ' + data.symbol + ' ' + data.side + ' ' + fmt(data.quantity, 5) + ' @ ' + fmt(data.price),
+           isBuy ? 'var(--green)' : 'var(--red)');
+  }
+
+  function renderFill(data) {
+    const tbody = $('fillsBody');
+    if (tbody.querySelector('.empty-state')) tbody.innerHTML = '';
+
+    const orderId = String(data.orderId);
+    const shortId = orderId.length > 8 ? orderId.substring(0, 8) + '…' : orderId;
+    const statusClass = data.status === 'FILLED' ? 'status-filled'
+                      : data.status === 'PARTIALLY_FILLED' ? 'status-partial'
+                      : 'status-other';
+
+    const tr = document.createElement('tr');
+    tr.className = 'fill-row';
+    tr.innerHTML =
+      '<td style="color:var(--txt2)" title="' + orderId + '">' + shortId + '</td>' +
+      '<td class="' + statusClass + '">' + data.status + '</td>' +
+      '<td style="color:var(--txt)">' + fmt(data.filledQty, 5) + '</td>' +
+      '<td style="color:var(--yellow)">' + fmt(data.lastFillPrice) + '</td>';
+
+    tbody.insertBefore(tr, tbody.firstChild);
+    addLog('Fill: order ' + shortId + ' → ' + data.status + ' @ ' + fmt(data.lastFillPrice), 'var(--purple)');
   }
 </script>
 </body>

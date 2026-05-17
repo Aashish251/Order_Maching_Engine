@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/ome_db
+    username: ${DB_USERNAME:ome_user}
+    password: ${DB_PASSWORD:ome_pass}
+
+  data:
+    redis:
+      host: redis
+      port: 6379
+      password: ${REDIS_PASSWORD:ome_redis_pass}
+
+  kafka:
+    bootstrap-servers: kafka:29092
+
+  zipkin:
+    base-url: http://zipkin:9411
+
+logging:
+  level:
+    com.project: INFO    # less verbose in production

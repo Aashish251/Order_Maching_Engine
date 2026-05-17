@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ome-app
+  namespace: ome
+  labels:
+    app: ome-app
+spec:
+  replicas: 2                    # run 2 instances for HA
+  selector:
+    matchLabels:
+      app: ome-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                # add 1 new pod before removing old
+      maxUnavailable: 0          # never have 0 running pods during deploy
+  template:
+    metadata:
+      labels:
+        app: ome-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path:   "/actuator/prometheus"
+        prometheus.io/port:   "8080"
+    spec:
+      containers:
+        - name: ome-app
+          image: ghcr.io/YOUR_GITHUB_USERNAME/ome:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: ome-config
+            - secretRef:
+                name: ome-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30
